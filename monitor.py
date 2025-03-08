@@ -1,65 +1,67 @@
-import psutil
 import time
-import platform
+from webcam_monitor import WebcamMonitor
+from detector import ThreatDetector
 import logging
-from hashlib import sha256
-import base64
+import platform
+import psutil
 
-# Track processes accessing the webcam in real-time.
+# Add basic logging configuration at the start
+logging.basicConfig(
+    filename='webcam_security.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
-class WebcamMonitor:
-    def __init__(self):
-        self.logger = logging.getLogger("WebcamMonitor")
-        self.os_type = platform.system()
-        
-    def _get_webcam_processes(self):
-        # Track processes accessing the webcam (OS-specific)
-        if self.os_type == "Windows":
-            return self._get_windows_webcam_processes()
-        elif self.os_type == "Linux":
-            return self._get_linux_webcam_processes()
-        else:
-            self.logger.error("Unsupported OS")
-            return []
-
-    def _get_windows_webcam_processes(self):
-        # Check webcam access via Windows registry or WMI (simplified example)
-        try:
-            import winreg
-            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Class\{6BDD1FC6-810F-11D0-BEC7-08002BE2092F}")
-            processes = []
-            for proc in psutil.process_iter(['pid', 'name']):
-                # Check if process is accessing webcam (placeholder logic)
-                processes.append(proc.info)
-            return processes
-        except Exception as e:
-            self.logger.error(f"Windows webcam check failed: {e}")
-            return []
-
-    def _get_linux_webcam_processes(self):
-        # Check /dev/video* devices (simplified example)
-        try:
-            processes = []
-            for proc in psutil.process_iter(['pid', 'name']):
-                # Check if process has open file descriptors to /dev/video*
-                for fd in proc.open_files():
-                    if '/dev/video' in fd.path:
-                        processes.append(proc.info)
-            return processes
-        except Exception as e:
-            self.logger.error(f"Linux webcam check failed: {e}")
-            return []
-
-    def run(self):
+def main():
+    logger = logging.getLogger(__name__)
+    monitor = WebcamMonitor()
+    detector = ThreatDetector()
+    
+    logger.info("Starting webcam monitoring...")
+    try:
         while True:
-            processes = self._get_webcam_processes()
+            processes = monitor._get_webcam_processes()
             if processes:
-                self.logger.warning(f"Webcam accessed by: {processes}")
-                # Hash process names for ML input (SHA-256 + Base64)
-                hashed_processes = [
-                    base64.b64encode(sha256(p['name'].encode()).hexdigest()
-                    for p in processes
-                ]
-                # Pass to Threat Detector
-                ThreatDetector().analyze(hashed_processes)
-            time.sleep(2)  # Check every 2 seconds
+                print(f"Found webcam processes: {processes}")
+                logger.info(f"Found processes: {processes}")
+                for process in processes:
+                    detector.analyze(process)
+            time.sleep(2)
+    except KeyboardInterrupt:
+        print("\nStopping webcam monitoring...")
+    except Exception as e:
+        logging.error(f"Error in main loop: {str(e)}")
+    finally:
+        logging.info("Monitor stopped")
+
+def _get_linux_webcam_processes(self):
+    try:
+        processes = []
+        for proc in psutil.process_iter(['pid', 'name']):
+            try:
+                # Skip system processes and processes we don't have access to
+                if proc.pid == 1 or proc.username() == 'root':
+                    continue
+                    
+                # Check if process has open file descriptors to /dev/video*
+                proc_files = proc.open_files()
+                if any('/dev/video' in fd.path for fd in proc_files):
+                    processes.append(proc.info)
+                    
+            except (psutil.AccessDenied, psutil.NoSuchProcess):
+                # Silently skip processes we can't access
+                continue
+            except Exception as e:
+                # Log only unexpected errors
+                self.logger.debug(f"Error checking process {proc.pid}: {str(e)}")
+                continue
+                
+        return processes
+        
+    except Exception as e:
+        # Log only unexpected errors that affect the entire function
+        self.logger.error(f"Unexpected error in webcam monitoring: {str(e)}")
+        return []
+
+if __name__ == "__main__":
+    main()
